@@ -1,0 +1,78 @@
+version: 2
+
+models:
+  - name: int_order_refunds_summary
+    description: "Order-level aggregation of completed and failed refunds."
+    columns:
+      - name: order_id
+        description: '{{ doc("order_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: completed_refund_amount
+        description: '{{ doc("completed_refund_amount") }}'
+        tests:
+          - not_null
+
+  - name: int_orders_enriched
+    description: "Orders joined with events, tenants, refunds, and financial anomaly flags. Imputes tenant_id."
+    columns:
+      - name: order_id
+        description: '{{ doc("order_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_tenants')
+                field: tenant_id
+      - name: gross_amount
+        description: '{{ doc("gross_amount") }}'
+      - name: fee_amount
+        description: '{{ doc("fee_amount") }}'
+      - name: tax_amount
+        description: '{{ doc("tax_amount") }}'
+      - name: completed_refund_amount
+        description: '{{ doc("completed_refund_amount") }}'
+      - name: net_revenue_amount
+        description: '{{ doc("net_revenue_amount") }}'
+        tests:
+          - not_null
+      - name: is_currency_mismatch
+        description: '{{ doc("is_currency_mismatch") }}'
+      - name: is_over_refunded
+        description: '{{ doc("is_over_refunded") }}'
+      - name: is_imputed_tenant
+        description: '{{ doc("is_imputed_tenant") }}'
+
+  - name: int_ticket_scans_summary
+    description: "Ticket-level aggregation of gate scan events."
+    columns:
+      - name: ticket_id
+        description: '{{ doc("ticket_id") }}'
+        tests:
+          - unique
+          - not_null
+
+  - name: int_tickets_enriched
+    description: "Tickets enriched with order status, event details, and scan activity flags. Imputes tenant_id."
+    columns:
+      - name: ticket_id
+        description: '{{ doc("ticket_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_tenants')
+                field: tenant_id
+      - name: is_attended
+        description: '{{ doc("is_attended") }}'

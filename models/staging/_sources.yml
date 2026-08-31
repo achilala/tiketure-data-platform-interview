@@ -1,0 +1,16 @@
+version: 2
+
+# The raw landed data is provided as dbt seeds (see /seeds). Seeds are
+# referenced with ref(), e.g. ref('raw_orders'). You are free to declare
+# these as formal sources instead if you prefer that pattern — your call.
+#
+# Available raw tables:
+#   raw_tenants    (tenant_id, tenant_name, created_at_utc)
+#   raw_venues     (venue_id, tenant_id, venue_name, city, timezone, capacity)
+#   raw_events     (event_id, tenant_id, venue_id, event_name, event_start_utc)
+#   raw_customers  (customer_id, tenant_id, email, full_name, country, created_at_utc)
+#   raw_orders     (order_id, tenant_id, customer_id, event_id, order_status,
+#                   gross_amount, fee_amount, tax_amount, currency, created_at_utc)
+#   raw_tickets    (ticket_id, order_id, tenant_id, event_id, ticket_status, price)
+#   raw_refunds    (refund_id, order_id, tenant_id, refund_amount, refund_status, created_at_utc)
+#   raw_scans      (scan_id, ticket_id, tenant_id, scanned_at_utc, gate)

@@ -1,0 +1,203 @@
+version: 2
+
+models:
+  - name: dim_tenants
+    description: "Tenant dimension model. Grain: 1 row per tenant (tenant_id)."
+    columns:
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: home_currency
+        description: '{{ doc("home_currency") }}'
+        tests:
+          - not_null
+      - name: created_at_utc
+        description: '{{ doc("created_at_utc") }}'
+
+  - name: dim_venues
+    description: "Venue dimension model. Grain: 1 row per venue (venue_id)."
+    columns:
+      - name: venue_id
+        description: '{{ doc("venue_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_tenants')
+                field: tenant_id
+
+  - name: dim_events
+    description: "Event dimension model enriched with venue details. Grain: 1 row per event (event_id)."
+    columns:
+      - name: event_id
+        description: '{{ doc("event_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_tenants')
+                field: tenant_id
+      - name: venue_id
+        description: '{{ doc("venue_id") }}'
+
+  - name: dim_customers
+    description: "Customer dimension model with identity resolution. Grain: 1 row per tenant and customer (customer_surrogate_key)."
+    columns:
+      - name: customer_surrogate_key
+        description: "Surrogate primary key (tenant_id || '_' || customer_id)."
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: '{{ doc("customer_id") }}'
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_tenants')
+                field: tenant_id
+
+  - name: fct_orders
+    description: "Order-level financial transaction fact model. Grain: 1 row per order (order_id)."
+    columns:
+      - name: order_id
+        description: '{{ doc("order_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_tenants')
+                field: tenant_id
+      - name: event_id
+        description: '{{ doc("event_id") }}'
+      - name: customer_id
+        description: '{{ doc("customer_id") }}'
+      - name: order_status
+        description: '{{ doc("order_status") }}'
+      - name: currency
+        description: '{{ doc("currency") }}'
+      - name: tenant_home_currency
+        description: '{{ doc("home_currency") }}'
+      - name: gross_amount
+        description: '{{ doc("gross_amount") }}'
+      - name: fee_amount
+        description: '{{ doc("fee_amount") }}'
+      - name: tax_amount
+        description: '{{ doc("tax_amount") }}'
+      - name: completed_refund_amount
+        description: '{{ doc("completed_refund_amount") }}'
+      - name: net_revenue_amount
+        description: '{{ doc("net_revenue_amount") }}'
+        tests:
+          - not_null
+      - name: is_currency_mismatch
+        description: '{{ doc("is_currency_mismatch") }}'
+      - name: is_over_refunded
+        description: '{{ doc("is_over_refunded") }}'
+
+  - name: fct_tickets
+    description: "Ticket inventory and status fact model. Grain: 1 row per ticket (ticket_id)."
+    columns:
+      - name: ticket_id
+        description: '{{ doc("ticket_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: order_id
+        description: '{{ doc("order_id") }}'
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_tenants')
+                field: tenant_id
+      - name: event_id
+        description: '{{ doc("event_id") }}'
+      - name: ticket_status
+        description: '{{ doc("ticket_status") }}'
+      - name: is_attended
+        description: '{{ doc("is_attended") }}'
+
+  - name: fct_gate_scans
+    description: "Access control gate scan fact model. Grain: 1 row per scan event (scan_id)."
+    columns:
+      - name: scan_id
+        description: '{{ doc("scan_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: ticket_id
+        description: '{{ doc("ticket_id") }}'
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_tenants')
+                field: tenant_id
+      - name: scanned_at_utc
+        description: '{{ doc("scanned_at_utc") }}'
+      - name: gate
+        description: '{{ doc("gate") }}'
+
+  - name: fct_tenant_event_revenue
+    description: "Aggregated financial and operational performance mart. Grain: 1 row per tenant, event, and currency."
+    columns:
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_tenants')
+                field: tenant_id
+      - name: event_id
+        description: '{{ doc("event_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_events')
+                field: event_id
+      - name: currency
+        description: '{{ doc("currency") }}'
+        tests:
+          - not_null
+      - name: gross_revenue
+        description: '{{ doc("gross_amount") }}'
+      - name: platform_fee_amount
+        description: '{{ doc("fee_amount") }}'
+      - name: tax_amount
+        description: '{{ doc("tax_amount") }}'
+      - name: completed_refund_amount
+        description: '{{ doc("completed_refund_amount") }}'
+      - name: net_revenue
+        description: '{{ doc("net_revenue_amount") }}'
+        tests:
+          - not_null
+          - reconciles_to_amount:
+              arguments:
+                expected_amount: 271.00
+                where_clause: "tenant_id = 'T1' and currency = 'USD'"

@@ -1,0 +1,5 @@
+event_id,tenant_id,venue_id,event_name,event_start_utc
+E1,T1,V1,Spring Opening Night,2025-03-01 01:00:00
+E2,T1,V2,Acoustic Evening,2025-03-15 18:00:00
+E3,T2,V3,Beacon Day Festival,2025-04-10 19:00:00
+E4,T1,V1,Late March Show,2025-03-20 23:30:00

@@ -1,0 +1,6 @@
+customer_id,tenant_id,email,full_name,country,created_at_utc
+C1,T1,alice@example.com,Alice Stone,US,2024-01-10 10:00:00
+C2,T1,bob@example.com,Bob Reyes,US,2024-02-01 14:30:00
+C3,T2,alice@example.com,Alice Stone,GB,2024-03-05 08:15:00
+C4,T2,dana@example.com,Dana Okoye,GB,2024-05-20 16:45:00
+C5,T1,alice@example.com,Alice M Stone,US,2024-07-01 09:00:00

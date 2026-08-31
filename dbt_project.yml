@@ -1,0 +1,30 @@
+name: "ticketure_takehome"
+version: "1.0.0"
+config-version: 2
+
+profile: "ticketure_takehome"
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  ticketure_takehome:
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: view
+    marts:
+      +materialized: table
+
+seeds:
+  ticketure_takehome:
+    +schema: raw

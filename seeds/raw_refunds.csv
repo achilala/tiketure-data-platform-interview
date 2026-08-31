@@ -1,0 +1,7 @@
+refund_id,order_id,tenant_id,refund_amount,refund_status,created_at_utc
+R1,O1,T1,50.00,completed,2025-02-25 10:00:00
+R1,O1,T1,50.00,completed,2025-02-25 10:00:00
+R2,O4,T2,100.00,completed,2025-04-05 11:00:00
+R3,O2,T1,100.00,failed,2025-02-26 09:00:00
+R4,O1,T1,30.00,completed,2025-02-19 08:00:00
+R5,O5,T2,150.00,completed,2025-04-06 14:00:00

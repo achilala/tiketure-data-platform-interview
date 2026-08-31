@@ -1,0 +1,204 @@
+version: 2
+
+models:
+  - name: stg_tenants
+    description: "Cleaned and standardized tenants dimension from raw_tenants (1:1 with source)."
+    columns:
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: tenant_name
+        description: "Display name of the tenant."
+        tests:
+          - not_null
+      - name: home_currency
+        description: '{{ doc("home_currency") }}'
+        tests:
+          - not_null
+      - name: created_at_utc
+        description: '{{ doc("created_at_utc") }}'
+        tests:
+          - not_null
+
+  - name: stg_venues
+    description: "Cleaned and standardized venues staging model (1:1 with source)."
+    columns:
+      - name: venue_id
+        description: '{{ doc("venue_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_tenants')
+                field: tenant_id
+      - name: timezone
+        description: "Standardized IANA timezone for the venue."
+        tests:
+          - not_null
+
+  - name: stg_events
+    description: "Cleaned and standardized events staging model (1:1 with source)."
+    columns:
+      - name: event_id
+        description: '{{ doc("event_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_tenants')
+                field: tenant_id
+      - name: venue_id
+        description: '{{ doc("venue_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_venues')
+                field: venue_id
+
+  - name: stg_customers
+    description: "Cleaned customer staging model (1:1 with source)."
+    columns:
+      - name: customer_id
+        description: '{{ doc("customer_id") }}'
+        tests:
+          - not_null
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_tenants')
+                field: tenant_id
+      - name: email
+        description: "Customer email address."
+        tests:
+          - not_null
+
+  - name: stg_orders
+    description: "Cleaned orders staging model (1:1 with source). Raw tenant_id is nullable for O6."
+    columns:
+      - name: order_id
+        description: '{{ doc("order_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+      - name: event_id
+        description: '{{ doc("event_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_events')
+                field: event_id
+      - name: order_status
+        description: '{{ doc("order_status") }}'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['completed', 'cancelled', 'pending']
+      - name: gross_amount
+        description: '{{ doc("gross_amount") }}'
+      - name: fee_amount
+        description: '{{ doc("fee_amount") }}'
+      - name: tax_amount
+        description: '{{ doc("tax_amount") }}'
+      - name: currency
+        description: '{{ doc("currency") }}'
+      - name: created_at_utc
+        description: '{{ doc("created_at_utc") }}'
+
+  - name: stg_tickets
+    description: "Cleaned tickets staging model (1:1 with source). Raw tenant_id is nullable for TK9."
+    columns:
+      - name: ticket_id
+        description: '{{ doc("ticket_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: order_id
+        description: '{{ doc("order_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_orders')
+                field: order_id
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+      - name: event_id
+        description: '{{ doc("event_id") }}'
+      - name: ticket_status
+        description: '{{ doc("ticket_status") }}'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['valid', 'cancelled', 'exchanged', 'comp']
+
+  - name: stg_refunds
+    description: "Deduplicated and standardized refunds staging model (1:1 with source)."
+    columns:
+      - name: refund_id
+        description: '{{ doc("refund_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: order_id
+        description: '{{ doc("order_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_orders')
+                field: order_id
+      - name: refund_amount
+        description: "Monetary amount refunded."
+      - name: refund_status
+        description: '{{ doc("refund_status") }}'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['completed', 'failed']
+      - name: created_at_utc
+        description: '{{ doc("created_at_utc") }}'
+
+  - name: stg_scans
+    description: "Cleaned ticket gate scans staging model (1:1 with source)."
+    columns:
+      - name: scan_id
+        description: '{{ doc("scan_id") }}'
+        tests:
+          - unique
+          - not_null
+      - name: ticket_id
+        description: '{{ doc("ticket_id") }}'
+      - name: tenant_id
+        description: '{{ doc("tenant_id") }}'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_tenants')
+                field: tenant_id
+      - name: scanned_at_utc
+        description: '{{ doc("scanned_at_utc") }}'
+      - name: gate
+        description: '{{ doc("gate") }}'

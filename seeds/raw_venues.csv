@@ -1,0 +1,4 @@
+venue_id,tenant_id,venue_name,city,timezone,capacity
+V1,T1,Apollo Main Hall,New York,America/New_York,200
+V2,T1,Apollo Annex,New York,,100
+V3,T2,Beacon Park,London,Europe/London,500

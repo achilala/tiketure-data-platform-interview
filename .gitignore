@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+
+dbt_packages/
+target/
+logs/
+.user.yml
+package-lock.yml.bak
+
+*.duckdb
+*.duckdb.wal
+
+.DS_Store
+
+INTERVIEWER_GUIDE.md

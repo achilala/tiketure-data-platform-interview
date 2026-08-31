@@ -1,0 +1,105 @@
+version: 2
+
+unit_tests:
+  - name: test_net_revenue_completed_order_with_refund
+    model: int_orders_enriched
+    description: "Validates that net revenue equals gross - tax - refund for completed orders."
+    given:
+      - input: ref('stg_orders')
+        rows:
+          - {order_id: 'O1', tenant_id: 'T1', customer_id: 'C1', event_id: 'E1', order_status: 'completed', gross_amount: 200.00, fee_amount: 20.00, tax_amount: 15.00, currency: 'USD', created_at_utc: '2025-02-20 11:00:00'}
+      - input: ref('stg_events')
+        rows:
+          - {event_id: 'E1', tenant_id: 'T1', venue_id: 'V1', event_name: 'Opening Night', event_start_utc: '2025-03-01 01:00:00'}
+      - input: ref('stg_tenants')
+        rows:
+          - {tenant_id: 'T1', tenant_name: 'Apollo Arena', home_currency: 'USD', created_at_utc: '2023-06-01 09:00:00'}
+      - input: ref('int_order_refunds_summary')
+        rows:
+          - {order_id: 'O1', tenant_id: 'T1', completed_refunds_count: 1, failed_refunds_count: 0, completed_refund_amount: 50.00, earliest_refund_at_utc: '2025-02-25 10:00:00', latest_refund_at_utc: '2025-02-25 10:00:00'}
+    expect:
+      rows:
+        - {order_id: 'O1', tenant_id: 'T1', net_revenue_amount: 135.00, is_currency_mismatch: false, is_over_refunded: false, is_imputed_tenant: false}
+
+  - name: test_net_revenue_cancelled_order_is_zero
+    model: int_orders_enriched
+    description: "Validates that cancelled orders result in $0.00 net revenue."
+    given:
+      - input: ref('stg_orders')
+        rows:
+          - {order_id: 'O3', tenant_id: 'T1', customer_id: 'C2', event_id: 'E2', order_status: 'cancelled', gross_amount: 50.00, fee_amount: 5.00, tax_amount: 4.00, currency: 'USD', created_at_utc: '2025-03-01 18:00:00'}
+      - input: ref('stg_events')
+        rows:
+          - {event_id: 'E2', tenant_id: 'T1', venue_id: 'V2', event_name: 'Acoustic Evening', event_start_utc: '2025-03-15 18:00:00'}
+      - input: ref('stg_tenants')
+        rows:
+          - {tenant_id: 'T1', tenant_name: 'Apollo Arena', home_currency: 'USD', created_at_utc: '2023-06-01 09:00:00'}
+      - input: ref('int_order_refunds_summary')
+        rows: []
+    expect:
+      rows:
+        - {order_id: 'O3', tenant_id: 'T1', net_revenue_amount: 0.00}
+
+  - name: test_missing_tenant_id_imputed_from_event
+    model: int_orders_enriched
+    description: "Validates that orders with missing tenant_id are correctly imputed from event metadata."
+    given:
+      - input: ref('stg_orders')
+        rows:
+          - {order_id: 'O6', tenant_id: null, customer_id: 'C4', event_id: 'E3', order_status: 'completed', gross_amount: 80.00, fee_amount: 8.00, tax_amount: 6.00, currency: 'GBP', created_at_utc: '2025-04-02 12:00:00'}
+      - input: ref('stg_events')
+        rows:
+          - {event_id: 'E3', tenant_id: 'T2', venue_id: 'V3', event_name: 'Beacon Day Festival', event_start_utc: '2025-04-10 19:00:00'}
+      - input: ref('stg_tenants')
+        rows:
+          - {tenant_id: 'T2', tenant_name: 'Beacon Festivals', home_currency: 'GBP', created_at_utc: '2023-09-15 12:00:00'}
+      - input: ref('int_order_refunds_summary')
+        rows: []
+    expect:
+      rows:
+        - {order_id: 'O6', tenant_id: 'T2', is_imputed_tenant: true, net_revenue_amount: 74.00}
+
+  - name: test_currency_mismatch_and_over_refund_flags
+    model: int_orders_enriched
+    description: "Validates flags when order currency differs from home currency and refund exceeds gross."
+    given:
+      - input: ref('stg_orders')
+        rows:
+          - {order_id: 'O5', tenant_id: 'T2', customer_id: 'C3', event_id: 'E3', order_status: 'completed', gross_amount: 100.00, fee_amount: 10.00, tax_amount: 7.00, currency: 'EUR', created_at_utc: '2025-04-02 10:00:00'}
+      - input: ref('stg_events')
+        rows:
+          - {event_id: 'E3', tenant_id: 'T2', venue_id: 'V3', event_name: 'Beacon Day Festival', event_start_utc: '2025-04-10 19:00:00'}
+      - input: ref('stg_tenants')
+        rows:
+          - {tenant_id: 'T2', tenant_name: 'Beacon Festivals', home_currency: 'GBP', created_at_utc: '2023-09-15 12:00:00'}
+      - input: ref('int_order_refunds_summary')
+        rows:
+          - {order_id: 'O5', tenant_id: 'T2', completed_refunds_count: 1, failed_refunds_count: 0, completed_refund_amount: 150.00, earliest_refund_at_utc: '2025-04-06 14:00:00', latest_refund_at_utc: '2025-04-06 14:00:00'}
+    expect:
+      rows:
+        - {order_id: 'O5', tenant_id: 'T2', is_currency_mismatch: true, is_over_refunded: true, net_revenue_amount: -57.00}
+
+  - name: test_ticket_attendance_and_invalid_scan_logic
+    model: int_tickets_enriched
+    description: "Validates attendance and invalid scan logic for valid vs cancelled tickets."
+    given:
+      - input: ref('stg_tickets')
+        rows:
+          - {ticket_id: 'TK1', order_id: 'O1', tenant_id: 'T1', event_id: 'E1', ticket_status: 'valid', price: 100.00}
+          - {ticket_id: 'TK4', order_id: 'O3', tenant_id: 'T1', event_id: 'E2', ticket_status: 'cancelled', price: 50.00}
+      - input: ref('stg_orders')
+        rows:
+          - {order_id: 'O1', tenant_id: 'T1', customer_id: 'C1', event_id: 'E1', order_status: 'completed', gross_amount: 200.00, fee_amount: 20.00, tax_amount: 15.00, currency: 'USD', created_at_utc: '2025-02-20 11:00:00'}
+          - {order_id: 'O3', tenant_id: 'T1', customer_id: 'C2', event_id: 'E2', order_status: 'cancelled', gross_amount: 50.00, fee_amount: 5.00, tax_amount: 4.00, currency: 'USD', created_at_utc: '2025-03-01 18:00:00'}
+      - input: ref('stg_events')
+        rows:
+          - {event_id: 'E1', tenant_id: 'T1', venue_id: 'V1', event_name: 'Opening Night', event_start_utc: '2025-03-01 01:00:00'}
+          - {event_id: 'E2', tenant_id: 'T1', venue_id: 'V2', event_name: 'Acoustic Evening', event_start_utc: '2025-03-15 18:00:00'}
+      - input: ref('int_ticket_scans_summary')
+        rows:
+          - {ticket_id: 'TK1', total_scans_count: 2, first_scanned_at_utc: '2025-03-01 01:30:00', last_scanned_at_utc: '2025-03-01 02:00:00', is_multi_scanned: true}
+          - {ticket_id: 'TK4', total_scans_count: 1, first_scanned_at_utc: '2025-03-01 01:45:00', last_scanned_at_utc: '2025-03-01 01:45:00', is_multi_scanned: false}
+    expect:
+      rows:
+        - {ticket_id: 'TK1', is_scanned: true, is_attended: true, is_invalid_scan: false, is_multi_scanned: true}
+        - {ticket_id: 'TK4', is_scanned: true, is_attended: false, is_invalid_scan: true, is_multi_scanned: false}

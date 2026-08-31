@@ -1,0 +1,14 @@
+version: 2
+
+unit_tests:
+  - name: test_stg_refunds_deduplicates_duplicate_rows
+    model: stg_refunds
+    description: "Validates that multiple raw refund rows with the exact same refund_id are deduplicated to 1 row."
+    given:
+      - input: ref('raw_refunds')
+        rows:
+          - {refund_id: 'R1', order_id: 'O1', tenant_id: 'T1', refund_amount: 50.00, refund_status: 'completed', created_at_utc: '2025-02-25 10:00:00'}
+          - {refund_id: 'R1', order_id: 'O1', tenant_id: 'T1', refund_amount: 50.00, refund_status: 'completed', created_at_utc: '2025-02-25 10:00:00'}
+    expect:
+      rows:
+        - {refund_id: 'R1', order_id: 'O1', tenant_id: 'T1', refund_amount: 50.00, refund_status: 'completed'}

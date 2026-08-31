@@ -1,0 +1,16 @@
+ticket_id,order_id,tenant_id,event_id,ticket_status,price
+TK1,O1,T1,E1,valid,100.00
+TK2,O1,T1,E1,exchanged,100.00
+TK3,O2,T1,E1,valid,100.00
+TK4,O3,T1,E2,cancelled,50.00
+TK5,O4,T2,E3,valid,100.00
+TK6,O4,T2,E3,valid,100.00
+TK7,O4,T2,E3,valid,100.00
+TK8,O5,T2,E3,valid,100.00
+TK9,O6,,E3,valid,80.00
+TK10,O7,T1,E2,valid,60.00
+TK11,O8,T1,E1,comp,0.00
+TK12,O8,T1,E1,comp,0.00
+TK13,O9,T2,E3,valid,100.00
+TK14,O9,T2,E3,valid,100.00
+TK15,O10,T1,E4,valid,80.00
