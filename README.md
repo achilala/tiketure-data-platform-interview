@@ -55,6 +55,8 @@ Requires Python 3.9+ and `make`.
 make setup    # creates a virtualenv, installs dbt-duckdb, installs dbt packages
 make build    # runs `dbt build` (seeds + models + tests)
 make docs     # generate and serve the dbt docs site locally: visualises model/column descriptions, tests and lineage graphs.
+make lint     # run sqlfluff linter
+make format   # auto-format SQL models with sqlfluff
 ```
 
 ---
@@ -66,33 +68,35 @@ make docs     # generate and serve the dbt docs site locally: visualises model/c
 I structured the project into a classical layered dbt architecture: **Staging (`models/staging/`)** $\rightarrow$ **Intermediate (`models/intermediate/`)** $\rightarrow$ **Marts (`models/marts/`)**.
 
 ### 1. Staging Layer (`models/staging/` — views)
-- `stg_tenants` — **Grain: 1 row per tenant (`tenant_id`)**. Cleans tenant names, standardizes timestamps.
+*Strict 1:1 mapping with raw source tables, without multi-table joins:*
+- `stg_tenants` — **Grain: 1 row per tenant (`tenant_id`)**. Cleans tenant names, standardizes timestamps, and defines `home_currency` (DRY).
 - `stg_venues` — **Grain: 1 row per venue (`venue_id`)**. Imputes missing timezone based on venue city (`America/New_York` for New York).
 - `stg_events` — **Grain: 1 row per event (`event_id`)**. Casts event start timestamps and trims event names.
 - `stg_customers` — **Grain: 1 row per customer record (`tenant_id`, `customer_id`)**. Normalizes emails (lowercase) and country codes.
-- `stg_orders` — **Grain: 1 row per order (`order_id`)**. Casts monetary columns to `numeric(10,2)`; imputes missing `tenant_id` from `events` (for `O6`).
-- `stg_tickets` — **Grain: 1 row per ticket (`ticket_id`)**. Casts price; imputes missing `tenant_id` from `events` (for `TK9`).
-- `stg_refunds` — **Grain: 1 row per refund (`refund_id`)**. Strictly deduplicates raw duplicate rows (e.g., duplicated `R1`) and casts amounts.
+- `stg_orders` — **Grain: 1 row per order (`order_id`)**. Casts monetary columns to `numeric(10,2)`; preserves raw nullable `tenant_id`.
+- `stg_tickets` — **Grain: 1 row per ticket (`ticket_id`)**. Casts price; preserves raw nullable `tenant_id`.
+- `stg_refunds` — **Grain: 1 row per refund (`refund_id`)**. Strictly deduplicates duplicate records (`R1`) using `QUALIFY row_number() = 1`.
 - `stg_scans` — **Grain: 1 row per gate scan (`scan_id`)**. Standardizes scan timestamps and gate identifiers.
 
 ### 2. Intermediate Layer (`models/intermediate/` — views)
-- `int_order_refunds_summary` — **Grain: 1 row per order (`order_id`)**. Aggregates completed vs. failed refund amounts and counts.
-- `int_orders_enriched` — **Grain: 1 row per order (`order_id`)**. Joins orders with events, tenants, and refund summaries; calculates order-level `net_revenue_amount`; flags operational anomalies (`is_currency_mismatch`, `is_over_refunded`, `is_refund_before_order`, `is_imputed_tenant`).
-- `int_ticket_scans_summary` — **Grain: 1 row per ticket (`ticket_id`)**. Aggregates total scan count, earliest/latest scan times, and multi-scan flags.
-- `int_tickets_enriched` — **Grain: 1 row per ticket (`ticket_id`)**. Joins tickets with order status and scan activity; computes attendance flags (`is_attended`) and invalid scan flags (`is_invalid_scan`).
+*Encapsulates multi-table joins, business imputation, metric calculation, and anomaly detection:*
+- `int_order_refunds_summary` — **Grain: 1 row per order (`order_id`)**. Aggregates completed vs. failed refund amounts and counts (`group by all`).
+- `int_orders_enriched` — **Grain: 1 row per order (`order_id`)**. Joins orders with events, tenants, and refund summaries; imputes missing `tenant_id`; calculates `net_revenue_amount` via `calculate_net_revenue` macro; flags operational anomalies (`is_currency_mismatch`, `is_over_refunded`, `is_refund_before_order`, `is_imputed_tenant`).
+- `int_ticket_scans_summary` — **Grain: 1 row per ticket (`ticket_id`)**. Aggregates total scan count, earliest/latest scan times, and multi-scan detection (`group by all`).
+- `int_tickets_enriched` — **Grain: 1 row per ticket (`ticket_id`)**. Joins tickets with order status and scan activity; resolves `tenant_id`; computes verified attendance (`is_attended`) and invalid scan flags (`is_invalid_scan`).
 
 ### 3. Marts Layer (`models/marts/` — tables)
 #### Dimensions
 - `dim_tenants` — **Grain: 1 row per tenant (`tenant_id`)**. Core tenant metadata and official settlement currency.
 - `dim_venues` — **Grain: 1 row per venue (`venue_id`)**. Venue location, capacity, and timezone.
 - `dim_events` — **Grain: 1 row per event (`event_id`)**. Event metadata denormalized with venue capacity and timezone.
-- `dim_customers` — **Grain: 1 row per tenant customer (`customer_surrogate_key` = `tenant_id || '_' || customer_id`)**. Tenant-scoped customer profile.
+- `dim_customers` — **Grain: 1 row per tenant customer (`customer_surrogate_key` = `tenant_id || '_' || customer_id`)**. Master Data Management (MDM) dimension resolving canonical customer IDs and identifying intra-tenant duplicate emails.
 
 #### Facts & Aggregations
 - `fct_orders` — **Grain: 1 row per order (`order_id`)**. Complete financial transaction fact table containing gross, fees, tax, completed refunds, net revenue, and audit flags.
 - `fct_tickets` — **Grain: 1 row per ticket (`ticket_id`)**. Ticket-level inventory, pricing, order status, scan counts, and attendance status.
 - `fct_gate_scans` — **Grain: 1 row per scan event (`scan_id`)**. Access control fact table validating ticket validity (identifies unknown barcodes like `TK999` and scans on cancelled/exchanged tickets).
-- `fct_tenant_event_revenue` — **Grain: 1 row per `tenant_id`, `event_id`, and `currency`**. The primary reporting mart answering the core business question. Aggregates gross revenue, platform fees, taxes, completed refunds, net revenue, ticket volume, scans, and attendance with data quality alert flags.
+- `fct_tenant_event_revenue` — **Grain: 1 row per `tenant_id`, `event_id`, and `currency`**. The primary reporting mart answering the core business question (`group by all`). Aggregates gross revenue, platform fees, taxes, completed refunds, net revenue, ticket volume, scans, and attendance with data quality alert flags.
 
 ---
 
@@ -104,11 +108,11 @@ I structured the project into a classical layered dbt architecture: **Staging (`
    - Only `completed` orders generate gross revenue and tax. `cancelled` (`O3`) and `pending` (`O7`) orders contribute `$0.00`.
    - Only `completed` refunds reduce net revenue. `failed` refunds (`R3`) are ignored.
 2. **Refund Deduplication**:
-   - Raw refund `R1` appears twice in `raw_refunds.csv`. We assume this is an ingestion/replay duplicate and deduplicate by `refund_id` in staging.
+   - Raw refund `R1` appears twice in `raw_refunds.csv`. We assume this is an ingestion/replay duplicate and deduplicate by `refund_id` in staging using `QUALIFY`.
 3. **Tenant Imputation**:
-   - Order `O6` and Ticket `TK9` arrived with `tenant_id = NULL`. Because they reference Event `E3` (which is exclusively owned by Tenant `T2`), we imputed `tenant_id = 'T2'` in staging to prevent revenue leakage, while maintaining an `is_imputed_tenant` audit flag.
-4. **Currency Handling**:
-   - T1 settles in `USD`, T2 settles in `GBP`. Order `O5` was transacted in `EUR`. Because no exchange rate table was provided, revenue is grouped and reported by `(tenant_id, event_id, currency)` rather than converted using guessed FX rates.
+   - Order `O6` and Ticket `TK9` arrived with `tenant_id = NULL`. Because they reference Event `E3` (which is exclusively owned by Tenant `T2`), we imputed `tenant_id = 'T2'` in intermediate models to prevent revenue leakage, while maintaining an `is_imputed_tenant` audit flag.
+4. **Currency Handling (DRY Single Source of Truth)**:
+   - `home_currency` is defined once in `stg_tenants` (T1 = `USD`, T2 = `GBP`) and reused downstream. Order `O5` was transacted in `EUR`. Because no exchange rate table was provided, revenue is grouped and reported by `(tenant_id, event_id, currency)` rather than converted using guessed FX rates.
 5. **Refund Timestamp Anomaly (`R4`)**:
    - Refund `R4` has timestamp `2025-02-19`, which is prior to order `O1` timestamp `2025-02-20`. We assume this is an upstream clock drift or manual backdated entry, but treat it as financially valid against `O1`.
 
@@ -162,6 +166,7 @@ Our model produces the following numbers for T2:
 | **Refund > Gross** | `raw_refunds` (`R5`), `raw_orders` (`O5`) | Refund `R5` ($150) exceeds order `O5` gross ($100) | Does the gateway allow goodwill refunds exceeding original capture, or was currency mislabeled? |
 | **Currency Mismatch** | `raw_orders` (`O5`) | Order `O5` is in `EUR`, but tenant `T2` home currency is `GBP` | Does checkout allow multi-currency selection? Where is the captured FX rate stored? |
 | **Missing Foreign Key** | `raw_orders` (`O6`), `raw_tickets` (`TK9`) | `tenant_id` is `NULL` on valid orders/tickets | Why is `tenant_id` nullable in operational databases? Can we enforce a NOT NULL constraint? |
+| **Duplicate Customer** | `raw_customers` (`C1`, `C5`) | Two customer accounts under `T1` with same email `alice@example.com` | Why are duplicate accounts created on same email? Is there identity deduplication at signup? |
 | **Ticket Sum Mismatch** | `raw_orders` (`O9`), `raw_tickets` (`TK13`, `TK14`) | Order gross is £250, but 2 tickets sum to £200 | Where is the £50 difference stored (e.g. VIP fee, donation, merchandise)? |
 | **Ghost Ticket Scan** | `raw_scans` (`S6`) | Scan `S6` references `TK999`, which does not exist in `raw_tickets` | Did a scanner scan an offline barcode, test ticket, or counterfeit pass? |
 | **Invalid Access Scans** | `raw_scans` (`S5`, `S7`) | `S5` scanned cancelled ticket `TK4`; `S7` scanned exchanged ticket `TK2` | Are gate scanners receiving real-time ticket cancellation webhooks? |
@@ -172,7 +177,7 @@ Our model produces the following numbers for T2:
 
 ## Trade-offs
 
-1. **Staging Imputation vs. Dead-Letter Routing**: Imputed `tenant_id` from `events` for `O6`/`TK9` directly in staging to produce complete financial marts, adding boolean audit flags (`is_imputed_tenant`). In a large production setup, unlinked records should be routed to a dead-letter quarantine table for manual triage.
+1. **Intermediate Imputation vs. Quarantine Queues**: Imputed `tenant_id` from `events` for `O6`/`TK9` in intermediate models to produce complete financial marts, adding boolean audit flags (`is_imputed_tenant`). In a large production setup, unlinked records should be routed to a dead-letter quarantine queue.
 2. **Multi-Currency Reporting vs. Synthetic Conversion**: Reported separate rows per `(tenant_id, event_id, currency)` rather than applying assumed exchange rates. This preserves financial auditability.
 3. **Order-Level Financial Grain**: Kept revenue, tax, and refund calculations at the order grain (`fct_orders`) rather than allocating refunds fractionally to tickets (`fct_tickets`), avoiding rounding errors and ambiguity from missing ticket line items on `O9`.
 4. **DuckDB Local Warehouse**: Materialized models as views/tables locally in DuckDB for instant execution and testability within the time limit.
@@ -181,21 +186,52 @@ Our model produces the following numbers for T2:
 
 ## How I would productionise this
 
-1. **Tenant Isolation & Snowflake Data Sharing**:
-   - Implement **Snowflake Row Access Policies (RAP)** based on `CURRENT_ROLE()` / `tenant_id` to guarantee tenant data isolation.
-   - Set up **Snowflake Secure Data Shares** directly pointing to `fct_tenant_event_revenue` and `dim_events` so tenants query their live data without pipeline replication.
-2. **CI/CD & Testing Automation**:
-   - GitHub Actions workflow executing `dbt build --select state:modified+` against ephemeral PR schemas.
-   - Enforce SQLFluff linting, dbt checkpoint, and PR branch validation before merging to `main`.
-3. **Environments & Zero-Downtime Deployment**:
-   - Separate `dev`, `staging`, and `prod` databases in Snowflake using zero-copy cloning for staging test runs.
-   - Blue/Green table swap strategy for zero-downtime mart refreshes.
-4. **Orchestration & CDC Ingestion**:
-   - Ingest transactional operational data via CDC (Debezium/Fivetran) into Snowflake Bronze raw tables.
-   - Orchestrate hourly or micro-batch dbt runs using **Airflow** / **Dagster** / **dbt Cloud**.
-5. **Observability & Anomaly Alerting**:
-   - Deploy **Elementary** or **Monte Carlo** for data observability (volume anomalies, refund spike detection, fresh data SLOs).
-   - Automated Slack/PagerDuty alerts triggered on reconciliation test failures.
+To transition this proof-of-concept into a mission-critical, enterprise-grade Snowflake data platform, I would implement the following architecture:
+
+### 1. Data Contracts & Upstream Ingestion Integrity
+- **dbt Model Contracts**: Enforce model contracts (`contract: { enforced: true }`) on public marts and staging layers with strict data types, non-null constraints, and accepted values.
+- **Upstream Schema Contracts & Schema Registry**: Implement JSON Schema / Protobuf event contracts in Kafka / AWS EventBridge for upstream application services (orders, scans, refunds) to prevent breaking schema changes from being deployed silently.
+- **Enforced Non-Null Foreign Keys**: Require upstream operational databases to enforce `tenant_id NOT NULL` at the database schema level.
+- **Dead-Letter Queue (DLQ) & Quarantine Pipeline**: Automatically divert contract-violating records (e.g. ghost ticket scans `TK999`, duplicate refund IDs, or refunds exceeding gross order value) into a quarantine schema (`quarantine.fct_data_quality_exceptions`) with automated alerting to operational teams.
+
+### 2. Service Level Agreements (SLAs) & Service Level Objectives (SLOs)
+Define clear, measurable SLOs and error budgets across all data products:
+- **Freshness SLO**:
+  - Operational raw ingestion (CDC): $P_{95} < 5\text{ minutes}$.
+  - Curated Marts (`fct_orders`, `fct_tenant_event_revenue`): Refreshed hourly ($P_{99} < 60\text{ minutes}$ from transaction capture).
+  - Gate Scans: Micro-batched every 5 minutes during active live events ($< 5\text{ min}$ latency).
+- **Availability / Uptime SLO**: 99.9% uptime for tenant reporting marts, BI dashboards, and Snowflake Data Shares.
+- **Data Quality & Reconciliation SLO**:
+  - **100% Reconciliation Accuracy**: Zero financial divergence on general ledger reconciliation tests (`assert_t1_net_revenue_reconciles`, `assert_order_financial_balance`) before exposing data to tenant shares.
+  - **Zero Orphaned Fact Records**: 0% dangling foreign keys in production marts.
+- **Error Budgets & Escalation**:
+  - PagerDuty incident automatically triggered if mart freshness exceeds 15 minutes or any financial reconciliation test fails during deployment.
+
+### 3. Tenant Safety & Multi-Tenant Data Isolation (Snowflake)
+- **Snowflake Row Access Policies (RAP)**: Attach dynamic row-level security policies to all marts:
+  ```sql
+  CREATE OR REPLACE ROW ACCESS POLICY tenant_isolation_policy AS (tenant_id VARCHAR) RETURNS BOOLEAN ->
+      CURRENT_ROLE() = 'DATA_ADMIN' OR tenant_id = CURRENT_ROLE_TENANT_ID();
+  ```
+- **Snowflake Secure Data Sharing**: Create secure views for tenant-facing data shares. Tenant A can query live curated marts via Snowflake Data Sharing without seeing Tenant B's data or platform fee margins.
+- **PII Data Masking**: Dynamic column masking policies on customer PII (`email`, `full_name`) restricting access based on user role for GDPR/CCPA compliance.
+
+### 4. CI/CD Pipeline & Automated Quality Gates
+- **GitHub Actions Workflow**:
+  - **Slim CI**: `dbt build --select state:modified+` executed against ephemeral PR schemas in Snowflake (or ephemeral DuckDB databases) using the production manifest artifact.
+  - **dbt Unit Tests**: Execute all mock unit tests on PR builds to verify SQL transformation logic before testing against data.
+  - **Static Code Analysis**: SQLFluff linting, yamllint, and dbt checkpoint schema validation enforced as required PR checks.
+- **Zero-Downtime Deployment**: Use Snowflake zero-copy cloning to build models in a staging database and execute `ALTER TABLE ... SWAP WITH ...` (blue/green deployment) for instantaneous table swaps with zero downtime.
+
+### 5. Orchestration & Incremental Materialization
+- **Orchestration**: Managed via **Airflow**, **Dagster**, or **dbt Cloud**, triggered via webhooks upon completion of CDC micro-batches (e.g. Fivetran/Debezium).
+- **Incremental Models & SCD Type 2 Snapshots**:
+  - Materialize high-volume tables (`fct_orders`, `fct_tickets`, `fct_gate_scans`) incrementally with merge strategies (`unique_key`).
+  - Use `dbt snapshot` (SCD Type 2) on raw order and ticket states to preserve historical audit trails of order cancellations, ticket exchanges, and refunds.
+
+### 6. Observability, Alerting & Lineage
+- **Data Observability**: Deploy **Elementary** or **Monte Carlo** for real-time monitoring of schema drift, volume anomalies, and test results.
+- **Operational Dashboards**: Metaplane/Datadog dashboards tracking data pipeline runtimes, test failures, and freshness metrics against defined SLOs.
 
 ---
 
